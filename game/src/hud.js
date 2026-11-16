@@ -3,11 +3,11 @@
 // end-of-round scoreboard. The simulation in main.js only calls these
 // setters; it never touches the document itself.
 
-import { WEAPONS, GRENADE } from './config.js';
+import { WEAPONS, GRENADE, SMOKE } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 
-export function createHud({ onBuy, onBuyGrenade, onDeploy }) {
+export function createHud({ onBuy, onBuyGrenade, onBuySmoke, onDeploy }) {
   const els = {
     hp: $('hp'), hpfill: $('hpfill'), money: $('money-value'), roundLabel: $('round-label'),
     timer: $('timer'), scoreA: $('score-a'), scoreB: $('score-b'),
@@ -51,6 +51,17 @@ export function createHud({ onBuy, onBuyGrenade, onDeploy }) {
     btn.addEventListener('click', () => onBuyGrenade());
     row.append(left, btn);
     els.buylist.appendChild(row);
+    const srow = document.createElement('div');
+    srow.className = 'buyrow';
+    const sleft = document.createElement('div');
+    sleft.innerHTML = `<b>7. ${SMOKE.name}</b> — $${SMOKE.price}<br><span class="stats">Blooms into a whiteout cloud that blocks sight lines — bots cannot see through it — for ${SMOKE.duration} s</span>`;
+    const sbtn = document.createElement('button');
+    sbtn.type = 'button';
+    sbtn.textContent = state.money >= SMOKE.price ? `Buy (×${state.smokes})` : 'Too dear';
+    sbtn.disabled = state.money < SMOKE.price;
+    sbtn.addEventListener('click', () => onBuySmoke());
+    srow.append(sleft, sbtn);
+    els.buylist.appendChild(srow);
   }
 
   return {
@@ -82,7 +93,7 @@ export function createHud({ onBuy, onBuyGrenade, onDeploy }) {
       els.ammoReserve.textContent = reserve;
       els.weaponName.textContent = weaponName;
     },
-    setGrenades(n) { els.grenades.textContent = `Frostpulse × ${n} · [G] throw`; },
+    setGrenades(n, smokes = 0) { els.grenades.textContent = `Frostpulse × ${n} [G] · Whiteout × ${smokes} [H]`; },
     setObjective(text) { els.objective.textContent = text; },
     setAlive(a, e) { els.alive.textContent = `Allies ${a} · Foes ${e}`; },
     message(text, sub = '') { els.message.textContent = text; els.sub.textContent = sub; },
@@ -99,11 +110,17 @@ export function createHud({ onBuy, onBuyGrenade, onDeploy }) {
       els.channelLabel.textContent = label;
       els.channelFill.style.width = Math.round(frac * 100) + '%';
     },
-    hitmark(killed) {
+    hitmark(killed, headshot = false) {
       els.hitmarker.classList.add('on');
+      // Headshots flash the marker red (the arms read var(--warn));
+      // a kill just burns brighter, a plain hit stays amber.
+      els.hitmarker.style.setProperty('--warn', headshot ? '#ff5252' : '');
       els.hitmarker.style.filter = killed ? 'brightness(1.6)' : '';
       clearTimeout(hitTimer);
-      hitTimer = setTimeout(() => els.hitmarker.classList.remove('on'), killed ? 260 : 110);
+      hitTimer = setTimeout(() => {
+        els.hitmarker.classList.remove('on');
+        els.hitmarker.style.setProperty('--warn', '');
+      }, killed || headshot ? 260 : 110);
     },
     hurt() {
       els.vignette.classList.add('hurt');

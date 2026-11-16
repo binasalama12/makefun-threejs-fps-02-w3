@@ -10,9 +10,10 @@
 // window.__shotReady once the first frame is on screen.
 
 import * as THREE from 'three';
-import { WEAPONS, GRENADE, ECONOMY, ROUND, TEAM_PLAYER, TEAM_ENEMY } from './config.js';
+import { WEAPONS, GRENADE, SMOKE, ECONOMY, ROUND, TEAM_PLAYER, TEAM_ENEMY } from './config.js';
 import { MAP, createWorld, collide } from './world.js';
 import { createBots } from './bots.js';
+import { createGrenades } from './grenades.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
 
@@ -45,7 +46,10 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 scene.add(camera);
 
 const world = createWorld(scene);
-const bots = createBots(scene, world, rng);
+// Filled in once the grenades module exists (below): a live smoke
+// cloud blocks bot sight lines just as it blocks the player's view.
+const vision = { blocksVision: null };
+const bots = createBots(scene, world, rng, vision);
 const audio = createAudio();
 
 // ---------- view-model weapon ----------
@@ -105,6 +109,7 @@ const S = {
   plantProgress: 0,
   defuseProgress: 0,
   grenades: 1,
+  smokes: 1,
   owned: ['nixie'],
   current: 'nixie',
   ammo: {}, // weaponId -> {mag, reserve}
@@ -132,6 +137,7 @@ const playerFeet = player.pos; // bots read this vector directly
 const hud = createHud({
   onBuy: (id) => buyWeapon(id),
   onBuyGrenade: () => buyGrenade(),
+  onBuySmoke: () => buySmoke(),
   onDeploy: () => deploy(),
 });
 function refreshHud() {
@@ -141,7 +147,7 @@ function refreshHud() {
   hud.setMoney(S.money);
   hud.setScore(S.scoreA, S.scoreB);
   hud.setAmmo(a.mag, a.reserve, w.name);
-  hud.setGrenades(S.grenades);
+  hud.setGrenades(S.grenades, S.smokes);
   hud.setRound(S.round, S.phase === 'buy' ? 'BUY PHASE' : S.phase === 'end' ? 'ROUND OVER' : S.planted ? 'CHARGE PLANTED' : 'LIVE');
   hud.setAlive(bots.allies.filter((b) => b.alive).length + (player.alive ? 1 : 0), bots.enemies.filter((b) => b.alive).length);
 }
@@ -167,6 +173,14 @@ function buyGrenade() {
   hud.renderBuy(S);
   refreshHud();
 }
+function buySmoke() {
+  if (S.money < SMOKE.price) { audio.denied(); return; }
+  S.money -= SMOKE.price;
+  S.smokes += 1;
+  audio.buy();
+  hud.renderBuy(S);
+  refreshHud();
+}
 
 // ---------- input ----------
 const keys = new Set();
@@ -181,6 +195,7 @@ window.addEventListener('keydown', (e) => {
     const idx = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
     if (idx >= 0) buyWeapon(WEAPONS[idx].id);
     if (e.code === 'Digit6') buyGrenade();
+    if (e.code === 'Digit7') buySmoke();
     if (e.code === 'Enter') deploy();
     return;
   }
@@ -189,6 +204,7 @@ window.addEventListener('keydown', (e) => {
   if (idx >= 0 && S.owned.includes(WEAPONS[idx].id)) { S.current = WEAPONS[idx].id; refreshHud(); }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'KeyG') throwGrenade();
+  if (e.code === 'KeyH') throwSmoke();
 });
 window.addEventListener('keyup', (e) => keys.delete(e.code));
 renderer.domElement.addEventListener('mousedown', (e) => {
@@ -230,6 +246,7 @@ function startBuy() {
   player.vel.set(0, 0, 0);
   player.yaw = 0; player.pitch = 0;
   bots.reset();
+  grenades.clear();
   for (const w of WEAPONS) if (S.owned.includes(w.id)) S.ammo[w.id] = { mag: w.mag, reserve: w.reserve };
   hud.hideEnd();
   hud.showBuy();
@@ -265,6 +282,7 @@ const raycaster = new THREE.Raycaster();
 const _dir = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _from = new THREE.Vector3();
+const _burstPos = new THREE.Vector3();
 function currentSpread() {
   const w = weaponDef();
   let factor = 1 + player.speed * 0.38; // moving opens the cone up
@@ -331,15 +349,18 @@ function playerShoot() {
       tracer(_from, end, 'player', !!bot);
       if (bot) {
         const part = hit.object.userData.part;
-        const dmg = w.damage * (part === 'head' ? w.headMult : part === 'legs' ? 0.7 : 1);
+        const isHead = part === 'head';
+        const dmg = w.damage * (isHead ? w.headMult : part === 'legs' ? 0.7 : 1);
         const wasAlive = bot.alive;
         bots.damageBot(bot, dmg, null);
-        hud.hitmark(!bot.alive);
-        audio.hit(!bot.alive);
+        hud.hitmark(!bot.alive, isHead);
+        audio.hit(!bot.alive, isHead);
         if (wasAlive && !bot.alive && bot.team === 'enemy') {
           S.kills += 1;
           S.money = Math.min(ECONOMY.maxMoney, S.money + ECONOMY.killReward);
-          hud.feed(`You dropped ${bot.name} · +$${ECONOMY.killReward}`);
+          hud.feed(isHead
+            ? `Headshot — you dropped ${bot.name} · +$${ECONOMY.killReward}`
+            : `You dropped ${bot.name} · +$${ECONOMY.killReward}`);
           checkElimination();
         }
       }
@@ -358,59 +379,32 @@ function checkElimination() {
   else if (!player.alive && bots.allies.every((b) => !b.alive) && !S.planted) endRound(false, 'The Frostwardens were wiped out.');
 }
 
-// ---------- grenade ----------
-const grenadeMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(0.11, 12, 10),
-  new THREE.MeshStandardMaterial({ color: 0xbfe9ff, emissive: 0x3d9dc9, emissiveIntensity: 1.2 }),
-);
-grenadeMesh.visible = false;
-scene.add(grenadeMesh);
-const grenadeState = { active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), fuse: 0 };
-const flashMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(1, 18, 14),
-  new THREE.MeshBasicMaterial({ color: 0xcdf2ff, transparent: true, opacity: 0 }),
-);
-flashMesh.visible = false;
-scene.add(flashMesh);
-let flashUntil = 0;
-function throwGrenade() {
-  if (S.phase !== 'live' || S.grenades <= 0 || grenadeState.active || !player.alive) return;
-  S.grenades -= 1;
-  camera.getWorldDirection(_dir);
-  grenadeState.pos.copy(camera.position);
-  grenadeState.vel.copy(_dir).multiplyScalar(15);
-  grenadeState.vel.y += 3.5;
-  grenadeState.fuse = 1.15;
-  grenadeState.active = true;
-  grenadeMesh.visible = true;
-  refreshHud();
-}
-function stepGrenade(dt) {
-  if (!grenadeState.active) return;
-  grenadeState.vel.y -= 18 * dt;
-  grenadeState.pos.addScaledVector(grenadeState.vel, dt);
-  if (grenadeState.pos.y < 0.12) { grenadeState.pos.y = 0.12; grenadeState.vel.set(0, 0, 0); }
-  grenadeMesh.position.copy(grenadeState.pos);
-  grenadeState.fuse -= dt;
-  if (grenadeState.fuse <= 0) {
-    grenadeState.active = false;
-    grenadeMesh.visible = false;
-    audio.grenade();
-    flashMesh.position.copy(grenadeState.pos).setY(1);
-    flashMesh.scale.setScalar(GRENADE.radius);
-    flashMesh.material.opacity = 0.4;
-    flashMesh.visible = true;
-    flashUntil = simTime + 0.28;
+// ---------- grenades (module: projectiles, frost burst, smoke) ----------
+const grenades = createGrenades(scene, {
+  audio,
+  time: () => simTime,
+  noiseAt: (pos, radius) => bots.noiseAt?.(pos, radius),
+  frostBurst(pos) {
     for (const foe of bots.enemies) {
       if (!foe.alive) continue;
-      const d = foe.group.position.distanceTo(grenadeState.pos);
-      if (d < GRENADE.radius) {
+      if (foe.group.position.distanceTo(pos) < GRENADE.radius) {
         foe.slowUntil = simTime + GRENADE.slowSeconds;
         bots.damageBot(foe, 15, botKillCtx);
         hud.feed(`Frostpulse caught ${foe.name}`);
       }
     }
-  }
+  },
+});
+vision.blocksVision = (a, b) => grenades.blocksVision(a, b);
+function throwGrenade() {
+  if (S.phase !== 'live' || S.grenades <= 0 || !player.alive) return;
+  camera.getWorldDirection(_dir);
+  if (grenades.throwFrost(camera.position, _dir)) { S.grenades -= 1; refreshHud(); }
+}
+function throwSmoke() {
+  if (S.phase !== 'live' || S.smokes <= 0 || !player.alive) return;
+  camera.getWorldDirection(_dir);
+  if (grenades.throwSmoke(camera.position, _dir)) { S.smokes -= 1; refreshHud(); }
 }
 
 // ---------- bot combat context ----------
@@ -454,7 +448,6 @@ function step(dt) {
   world.stepSnow(dt, player.pos);
   for (const slot of tracerPool) if (simTime > slot.until) slot.line.material.opacity = 0;
   if (simTime > muzzleTime + 0.05) muzzle.intensity = 0;
-  if (flashMesh.visible && simTime > flashUntil) { flashMesh.visible = false; flashMesh.material.opacity = 0; }
   gunGroup.position.z += (-0.5 - gunGroup.position.z) * Math.min(1, dt * 11);
   S.bloom = Math.max(0, S.bloom - dt * 0.05);
   if (S.reloadingUntil && simTime >= S.reloadingUntil) { S.reloadingUntil = 0; finishReload(); }
@@ -500,7 +493,7 @@ function step(dt) {
 
   // --- bots ---
   bots.step(dt, botCtx);
-  stepGrenade(dt);
+  grenades.step(dt);
 
   // --- objective: plant, fuse, defuse ---
   const distSilo = Math.hypot(player.pos.x - MAP.siloPos.x, player.pos.z - MAP.siloPos.z);
@@ -542,11 +535,7 @@ function step(dt) {
     hud.setTimer('💥 ' + Math.max(0, S.fuse).toFixed(1), S.fuse < 3);
     if (S.fuse <= 0) {
       audio.detonate();
-      flashMesh.position.set(MAP.siloPos.x, 3, MAP.siloPos.z);
-      flashMesh.scale.setScalar(9);
-      flashMesh.material.opacity = 0.55;
-      flashMesh.visible = true;
-      flashUntil = simTime + 0.5;
+      grenades.burst(_burstPos.set(MAP.siloPos.x, 3, MAP.siloPos.z), 9, 0.55, 0.5);
       endRound(true, 'The charge blew the fuel silo sky-high.');
       return;
     }
@@ -621,6 +610,7 @@ function stageShot(mode) {
     S.owned = ['nixie', 'vela']; S.current = 'vela';
     S.ammo.vela = { mag: 21, reserve: 84 };
     S.grenades = 1;
+    S.smokes = 1;
     player.pos.set(4.2, 0, 5.5);
     const [e0, e1, e2, e3] = bots.enemies;
     e0.group.position.set(2.2, 0, -5.5);

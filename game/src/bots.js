@@ -40,7 +40,7 @@ function buildFigure(scene, mats) {
   return { group, hitMeshes, gun };
 }
 
-export function createBots(scene, world, rng) {
+export function createBots(scene, world, rng, vision = null) {
   const raycaster = new THREE.Raycaster();
   const bots = [];
   const hitMeshes = [];
@@ -108,7 +108,11 @@ export function createBots(scene, world, rng) {
     _dir.copy(_to).sub(_from).normalize();
     raycaster.set(_from, _dir);
     raycaster.far = dist - 0.6;
-    return raycaster.intersectObjects(world.blockers, false).length === 0;
+    if (raycaster.intersectObjects(world.blockers, false).length > 0) return false;
+    // A live Whiteout cloud is a soft wall: nobody sees through it,
+    // so a smoked lane genuinely breaks a held angle.
+    if (vision && vision.blocksVision && vision.blocksVision(_from, _to)) return false;
+    return true;
   }
 
   function moveToward(bot, target, dt, speed) {

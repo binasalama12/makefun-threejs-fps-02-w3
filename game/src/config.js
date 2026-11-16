@@ -13,33 +13,38 @@ export const ENEMY_NAMES = ['Soot Bram', 'Soot Ysolde', 'Soot Fenwick', 'Soot Ma
 // tightens a gun back down — accuracy is a decision, not a dice roll.
 export const WEAPONS = [
   {
-    id: 'nixie', name: 'Nixie P2 Sidearm', price: 0, damage: 24, headMult: 2.6,
+    id: 'nixie', name: 'Nixie P2 Sidearm', price: 0, damage: 24, headMult: 4.0,
     interval: 0.27, mag: 12, reserve: 60, reloadMs: 1100, spread: 0.013,
     pellets: 1, auto: false, kick: 0.010, range: 60,
   },
   {
-    id: 'squall', name: 'Squall-9 Gust SMG', price: 900, damage: 19, headMult: 2.2,
+    id: 'squall', name: 'Squall-9 Gust SMG', price: 900, damage: 19, headMult: 3.4,
     interval: 0.075, mag: 32, reserve: 128, reloadMs: 1600, spread: 0.030,
     pellets: 1, auto: true, kick: 0.006, range: 55,
   },
   {
-    id: 'vela', name: 'Vela AR-7 Carbine', price: 2400, damage: 34, headMult: 2.8,
+    id: 'vela', name: 'Vela AR-7 Carbine', price: 2400, damage: 34, headMult: 4.0,
     interval: 0.115, mag: 30, reserve: 120, reloadMs: 2000, spread: 0.019,
     pellets: 1, auto: true, kick: 0.011, range: 90,
   },
   {
-    id: 'breakice', name: 'Breakice Scattergun', price: 1500, damage: 11, headMult: 1.6,
+    id: 'breakice', name: 'Breakice Scattergun', price: 1500, damage: 11, headMult: 2.0,
     interval: 0.85, mag: 6, reserve: 30, reloadMs: 2600, spread: 0.055,
     pellets: 8, auto: false, kick: 0.030, range: 26,
   },
   {
-    id: 'longnight', name: 'Longnight Marksman', price: 3200, damage: 68, headMult: 3.0,
+    id: 'longnight', name: 'Longnight Marksman', price: 3200, damage: 68, headMult: 3.5,
     interval: 0.55, mag: 10, reserve: 40, reloadMs: 2400, spread: 0.006,
     pellets: 1, auto: false, kick: 0.022, range: 130,
   },
 ];
 
 export const GRENADE = { name: 'Frostpulse Grenade', price: 300, radius: 7, slowSeconds: 4 };
+
+// The second throwable: a chalk charge that blooms into a whiteout
+// cloud. It deals no damage — it deletes a sight line for a few
+// seconds, for the player's eyes and the bots' alike.
+export const SMOKE = { name: 'Whiteout Smokescreen', price: 250, radius: 4.2, duration: 9, bloomSeconds: 0.9 };
 
 export const ECONOMY = {
   startMoney: 2600,

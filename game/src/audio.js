@@ -68,7 +68,17 @@ export function createAudio() {
     dryFire() { tone({ freq: 1200, duration: 0.03, gain: 0.05 }); },
     reloadStart() { tone({ freq: 340, duration: 0.05, gain: 0.06 }); noiseBurst({ duration: 0.05, freq: 900, gain: 0.06 }); },
     reloadEnd() { tone({ freq: 520, duration: 0.05, gain: 0.07 }); },
-    hit(killed) { tone({ freq: killed ? 980 : 740, duration: 0.06, gain: 0.09, type: 'sine' }); },
+    hit(killed, headshot = false) {
+      // A headshot gets its own bright two-note ding so a clean dome
+      // shot is audible without ever looking at the hitmarker.
+      if (headshot) {
+        tone({ freq: 1568, duration: 0.07, gain: 0.11, type: 'sine' });
+        setTimeout(() => tone({ freq: killed ? 2637 : 2093, duration: 0.09, gain: 0.1, type: 'sine' }), 45);
+        return;
+      }
+      tone({ freq: killed ? 980 : 740, duration: 0.06, gain: 0.09, type: 'sine' });
+    },
+    smoke() { noiseBurst({ duration: 0.6, freq: 640, gain: 0.07, type: 'lowpass' }); },
     hurt() { tone({ freq: 130, end: 70, duration: 0.16, gain: 0.14, type: 'sawtooth' }); },
     buy() { tone({ freq: 880, duration: 0.06, gain: 0.07, type: 'sine' }); setTimeout(() => tone({ freq: 1320, duration: 0.07, gain: 0.07, type: 'sine' }), 60); },
     denied() { tone({ freq: 220, end: 160, duration: 0.12, gain: 0.08 }); },
