@@ -324,6 +324,7 @@ function playerShoot() {
   S.nextShot = simTime + w.interval;
   S.bloom = Math.min(0.045, S.bloom + w.spread * 0.9);
   audio.shot(1);
+  bots.noiseAt(player.pos, 26); // gunfire carries — nearby bots come looking
   muzzle.intensity = 26;
   muzzleTime = simTime;
   gunGroup.position.z = -0.42;

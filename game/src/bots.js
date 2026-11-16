@@ -1,7 +1,10 @@
 // Frostline Depot — the crews. Each bot is a small state machine:
-// patrol a waypoint loop, and when it has line of sight on a foe it
-// stops, strafes a little and fires short bursts. Bots hear the charge
-// get planted and the whole Soot Syndicate rushes the silo to defuse.
+// patrol a waypoint loop, hold each waypoint a moment to watch the
+// lane ahead, and when it has line of sight on a foe it stops,
+// strafes a little and fires short bursts. Bots also hear: gunfire
+// and explosions in earshot turn them toward the sound and send them
+// to investigate the spot. Bots hear the charge get planted and the
+// whole Soot Syndicate rushes the silo to defuse.
 
 import * as THREE from 'three';
 import { ALLY_NAMES, ENEMY_NAMES } from './config.js';
@@ -62,6 +65,8 @@ export function createBots(scene, world, rng, vision = null) {
       strafeDir: rng() > 0.5 ? 1 : -1,
       strafeTimer: 0,
       slowUntil: 0,
+      holdUntil: 0,
+      investigate: { x: 0, z: 0, until: -1, on: false },
       defusing: false,
       speedNow: 0,
       lastSeenAt: -10,
@@ -93,6 +98,9 @@ export function createBots(scene, world, rng, vision = null) {
       bot.wpIndex = 0;
       bot.fireTimer = 1 + rng() * 1.5;
       bot.burstLeft = 0;
+      bot.holdUntil = 0;
+      bot.slowUntil = 0;
+      bot.investigate.on = false;
     }
   }
 
@@ -113,6 +121,22 @@ export function createBots(scene, world, rng, vision = null) {
     // so a smoked lane genuinely breaks a held angle.
     if (vision && vision.blocksVision && vision.blocksVision(_from, _to)) return false;
     return true;
+  }
+
+  // A loud event in the yard: every bot in earshot snaps toward the
+  // sound and marks the spot to investigate on its next steps.
+  function noiseAt(pos, radius = 24) {
+    for (const bot of bots) {
+      if (!bot.alive) continue;
+      const dx = pos.x - bot.group.position.x;
+      const dz = pos.z - bot.group.position.z;
+      if (dx * dx + dz * dz > radius * radius) continue;
+      bot.investigate.x = pos.x;
+      bot.investigate.z = pos.z;
+      bot.investigate.until = -1; // armed with a deadline on its next step
+      bot.investigate.on = true;
+      bot.yaw = Math.atan2(dx, dz);
+    }
   }
 
   function moveToward(bot, target, dt, speed) {
@@ -207,12 +231,34 @@ export function createBots(scene, world, rng, vision = null) {
     const target = pickTarget(bot, ctx);
     if (target) {
       bot.lastSeenAt = ctx.time;
+      bot.investigate.on = false;
       engage(bot, target, dt, ctx);
+    } else if (bot.investigate.on) {
+      // Heard something: go and look at where the sound came from,
+      // then hold there briefly before falling back to the route.
+      if (bot.investigate.until < 0) bot.investigate.until = ctx.time + 5;
+      if (ctx.time > bot.investigate.until) {
+        bot.investigate.on = false;
+      } else {
+        const d = moveToward(bot, bot.investigate, dt, speed * 0.92);
+        if (d < 1.3) {
+          bot.investigate.on = false;
+          bot.holdUntil = ctx.time + 1.2 + rng() * 1.4;
+        }
+      }
+    } else if (ctx.time < bot.holdUntil) {
+      // Holding the waypoint: stand still and watch the lane toward
+      // the next point instead of wandering on immediately.
+      bot.speedNow = 0;
+      face(bot, bot.route[bot.wpIndex % bot.route.length]);
     } else {
       // Patrol the loop; allies push north, enemies hold the silo end.
       const wp = bot.route[bot.wpIndex % bot.route.length];
       const dist = moveToward(bot, wp, dt, speed * 0.72);
-      if (dist < 0.8) bot.wpIndex = (bot.wpIndex + 1) % bot.route.length;
+      if (dist < 0.8) {
+        bot.wpIndex = (bot.wpIndex + 1) % bot.route.length;
+        bot.holdUntil = ctx.time + 1.2 + rng() * 1.8;
+      }
     }
     bot.group.rotation.y = bot.yaw;
   }
@@ -255,5 +301,5 @@ export function createBots(scene, world, rng, vision = null) {
   }
 
   reset();
-  return { bots, allies, enemies, hitMeshes, reset, step, damageBot, hasSight };
+  return { bots, allies, enemies, hitMeshes, reset, step, damageBot, hasSight, noiseAt };
 }
